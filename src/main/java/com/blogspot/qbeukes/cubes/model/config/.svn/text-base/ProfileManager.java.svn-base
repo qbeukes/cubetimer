@@ -1,0 +1,213 @@
+package com.blogspot.qbeukes.cubes.model.config;
+
+import java.io.IOException;
+import java.io.Serializable;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
+
+/**
+ * Manages the list of profiles and contains which one is active.
+ * <p/>
+ * User: quintin
+ * Date: 20 Nov 2010
+ * Time: 10:09:03 PM
+ */
+public class ProfileManager implements Serializable {
+  private static final long serialVersionUID = -1197667150457882720L;
+  
+  public static final String DEFAULT_PROFILE_NAME = "Default";
+
+  private Map<String, Profile> profiles = new HashMap<String, Profile>();
+
+  private String activeProfile;
+
+  private transient List<ProfileListener> listeners;
+
+  public ProfileManager() {
+    initializeListenersList();
+    selectActiveProfile();
+  }
+
+  private void initializeListenersList() {
+    listeners = new CopyOnWriteArrayList<ProfileListener>();
+  }
+
+  /**
+   * Deserialization
+   */
+  private void readObject(java.io.ObjectInputStream in) throws IOException, ClassNotFoundException {
+    in.defaultReadObject();
+    initializeListenersList();
+  }
+
+  /**
+   * Will select an active profile named {@link #DEFAULT_PROFILE_NAME}, or use the first available one
+   * if there is no such profile. If no profiles exists, this will creates one named {@link #DEFAULT_PROFILE_NAME}.
+   */
+  private void selectActiveProfile() {
+    String newActiveProfile;
+
+    if (profiles.size() == 0) {
+      newActiveProfile = DEFAULT_PROFILE_NAME;
+      profiles.put(DEFAULT_PROFILE_NAME, new Profile(DEFAULT_PROFILE_NAME));
+    }
+    else {
+      // try and find one named DEFAULT_PROFILE_NAME, else just use the first
+      if (profiles.containsKey(DEFAULT_PROFILE_NAME)) {
+        newActiveProfile = DEFAULT_PROFILE_NAME;
+      }
+      else {
+        newActiveProfile = profiles.keySet().iterator().next();
+      }
+    }
+
+    try {
+      setActiveProfile(newActiveProfile);
+    }
+    catch (ConfigException e) {
+      System.err.println("Error configuring active profile. At this stage this probably indicates a concurrency error.");
+      e.printStackTrace(System.err);
+    }
+  }
+
+  /**
+   * @return The currently selected profile
+   */
+  public Profile getActiveProfile() {
+    return profiles.get(activeProfile);
+  }
+
+  /**
+   * Sets the active profile. An {@link ProfileListener#activeProfileChanged()} event will be fired if the active
+   * profile changed. If the supplied profile name is already the active profile then this method will have no effect.
+   *
+   * @param name
+   * @throws IllegalArgumentException If the supplied profile name is null
+   * @throws ConfigException If the profile doesn't exist.
+   */
+  public void setActiveProfile(String name) throws ConfigException {
+    if (name == null) {
+      throw new IllegalArgumentException("Profile name may not be null.");
+    }
+
+    if (!profileExists(name)) {
+      throw new ConfigException("Profile doesn't exist.");
+    }
+
+    if (activeProfile != null && activeProfile.equals(name)) {
+      return;
+    }
+    
+    System.out.println("Set active profile to: " + name);
+    activeProfile = name;
+
+    fireActiveProfileChanged();
+  }
+
+  /**
+   * @return List of all profiles.
+   */
+  public Collection<Profile> getProfiles() {
+    return Collections.unmodifiableCollection(profiles.values());
+  }
+
+  /**
+   * @return True if a profile with the specified name exists.
+   */
+  public boolean profileExists(String profileName) {
+    return profiles.containsKey(profileName);
+  }
+
+  /**
+   * Removes the specified profile. This will also delete it's data. If the profile doesn't exist, this method will have
+   * no effect. The profilesChanged event will only be fired if a profile was actually removed.
+   *
+   * @param name Profile name
+   * @throws IllegalArgumentException If the profile name is null
+   */
+  public void removeProfile(String name) {
+    if (name == null) {
+      throw new IllegalArgumentException("Profile name may not be null.");
+    }
+
+    Profile removed = profiles.remove(name);
+
+    // select a new active profile
+    if (name.equals(activeProfile)) {
+      // hack for when we're deleting "Default", and the selectActiveProfile creates a "Default", which results
+      // in setActiveProfile thinking we're not changing anything
+      activeProfile = null;
+      selectActiveProfile();
+    }
+
+    if (removed != null) {
+      fireProfilesChanged();
+    }
+  }
+
+  /**
+   * Registers a profile.
+   *
+   * @param name Profile name
+   * @return Registered profile
+   * @throws ConfigException If there was a problem saving the profile
+   */
+  public void registerProfile(String name) throws ConfigException {
+    if (profileExists(name)) {
+      throw new ConfigException("Profile already exists.");
+    }
+
+    profiles.put(name, new Profile(name));
+    fireProfilesChanged();
+  }
+
+  /**
+   * Return a profile with the specified name
+   *
+   * @param name
+   * @return The specified profile or null if it doesn't exist
+   */
+  public Profile getProfile(String name) {
+    return profiles.get(name);
+  }
+
+  /**
+   * Add a new ProfileListener
+   *
+   * @param profileListener
+   */
+  public void addProfileListener(ProfileListener profileListener) {
+    listeners.add(profileListener);
+  }
+
+  /**
+   * Remove a ProfileListener
+   *
+   * @param profileListener
+   */
+  public void removeProfileListener(ProfileListener profileListener) {
+    listeners.remove(profileListener);
+  }
+
+  /**
+   * Fires a activeProfileChanged event
+   */
+  public void fireActiveProfileChanged() {
+    for (ProfileListener listener : listeners) {
+      listener.activeProfileChanged();
+    }
+  }
+
+  /**
+   * Fires a profilesChanged event
+   */
+  public void fireProfilesChanged() {
+    for (ProfileListener listener : listeners) {
+      listener.profilesChanged();
+    }
+  }
+}
